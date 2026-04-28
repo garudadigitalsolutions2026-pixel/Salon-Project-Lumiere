@@ -68,6 +68,13 @@ export default function BookingModal() {
       });
       clearTimeout(id);
       
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        console.error('Server returned non-JSON response:', text.substring(0, 200));
+        throw new Error('Our booking system is currently undergoing maintenance. Please try again in a few minutes.');
+      }
+
       const data = await res.json();
       if (res.ok && data.success) {
         setStep('otp');
@@ -96,6 +103,12 @@ export default function BookingModal() {
         signal: controller.signal
       });
       clearTimeout(id);
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error('Connection error. Please try again.');
+      }
+
       if (res.ok) {
         setStep('schedule');
       } else {

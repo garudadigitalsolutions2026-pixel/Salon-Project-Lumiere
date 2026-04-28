@@ -1,13 +1,19 @@
 import 'dotenv/config';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import { BrevoClient } from '@getbrevo/brevo';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
 const app = express();
 const PORT = 3000;
+
+// Initialize Firebase
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -20,19 +26,24 @@ const brevo = process.env.BREVO_API_KEY ? new BrevoClient({ apiKey: process.env.
 const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || 'concierge@lumiere.cz';
 const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || 'Lumière Salon';
 
-// Memory-based verification store for MVP (In production, use Firestore with TTL)
-const otpStore = new Map<string, { code: string; expires: number }>();
+// No longer using memory store
+// const otpStore = new Map<string, { code: string; expires: number }>();
 
 app.post('/api/send-otp', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
 
   const code = Math.floor(100000 + Math.random() * 900000).toString();
-  otpStore.set(email, { code, expires: Date.now() + 10 * 60 * 1000 }); // 10 mins
-
-  console.log(`[AUTH] Generating OTP for ${email}: ${code}`);
-
+  
   try {
+    // 1. Store OTP in Firestore
+    await setDoc(doc(db, 'otps', email), { 
+      code, 
+      expires: Date.now() + 10 * 60 * 1000 
+    });
+    console.log(`[AUTH] Generating OTP for ${email}: ${code}`);
+
+    // 2. Send email via Brevo
     if (brevo) {
       console.log(`[AUTH] Attempting to send email via Brevo to ${email}`);
       await brevo.transactionalEmails.sendTransacEmail({
@@ -54,24 +65,31 @@ app.post('/api/send-otp', async (req, res) => {
     }
     res.json({ success: true });
   } catch (error) {
-    console.error('[AUTH] Brevo error:', error);
+    console.error('[AUTH] OTP error:', error);
     res.status(500).json({ 
       success: false, 
-      error: 'EMAIL_SERVICE_FAILURE',
-      message: 'We could not send your verification code. Please check your email address or try again later.'
+      error: 'OTP_SERVICE_FAILURE',
+      message: 'We could not process your request at this time.'
     });
   }
 });
 
-app.post('/api/verify-otp', (req, res) => {
+app.post('/api/verify-otp', async (req, res) => {
   const { email, code } = req.body;
-  const stored = otpStore.get(email);
+  
+  try {
+    const otpDoc = await getDoc(doc(db, 'otps', email));
+    const stored = otpDoc.data();
 
-  if (stored && stored.code === code && stored.expires > Date.now()) {
-    otpStore.delete(email); // One-time use
-    res.json({ success: true });
-  } else {
-    res.status(400).json({ success: false, error: 'Invalid or expired code' });
+    if (stored && stored.code === code && stored.expires > Date.now()) {
+      await deleteDoc(doc(db, 'otps', email)); // One-time use
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ success: false, error: 'Invalid or expired code' });
+    }
+  } catch (error) {
+    console.error('[AUTH] Verify OTP error:', error);
+    res.status(500).json({ error: 'Verification system error' });
   }
 });
 
@@ -114,24 +132,31 @@ app.post('/api/send-confirmation', async (req, res) => {
   }
 });
 
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+// Only setup Vite/static if NOT on Vercel (Vercel handles static via vercel.json)
+if (!process.env.VERCEL) {
+  async function startServer() {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      if (require('fs').existsSync(distPath)) {
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      }
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running at http://localhost:${PORT}`);
     });
   }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-  });
+  startServer();
 }
 
-startServer();
+export default app;

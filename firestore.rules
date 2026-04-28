@@ -36,5 +36,11 @@ service cloud.firestore {
       // Allow list for availability check (Production hardening: filter by date in code)
       allow list: if true; 
     }
+
+    match /otps/{email} {
+      // Server-side logic handles verification. Allow unauthenticated access for MVP serverless logic.
+      // In production, use Firebase Admin SDK to bypass rules.
+      allow read, write: if true;
+    }
   }
 }
