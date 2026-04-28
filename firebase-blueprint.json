@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "booking": {
+      "title": "Booking",
+      "description": "A salon service booking made by a client.",
+      "type": "object",
+      "properties": {
+        "clientName": { "type": "string", "description": "Full name of the client." },
+        "email": { "type": "string", "format": "email", "description": "Email address of the client." },
+        "phone": { "type": "string", "description": "Phone number of the client." },
+        "serviceId": { "type": "string", "description": "ID of the selected service." },
+        "stylistId": { "type": "string", "description": "ID of the selected stylist." },
+        "date": { "type": "string", "format": "date", "description": "Date of the booking." },
+        "time": { "type": "string", "description": "Time slot of the booking." },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"], "description": "Current status of the booking." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when the booking was created." }
+      },
+      "required": ["clientName", "email", "serviceId", "stylistId", "date", "time", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/bookings/{bookingId}": {
+      "schema": "booking",
+      "description": "Collection of salon bookings."
+    }
+  }
+}
