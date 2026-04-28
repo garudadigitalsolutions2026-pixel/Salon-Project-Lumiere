@@ -6,14 +6,32 @@ import bodyParser from 'body-parser';
 import { BrevoClient } from '@getbrevo/brevo';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
-import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
+import { readFileSync, existsSync } from 'fs';
 
 const app = express();
 const PORT = 3000;
 
 // Initialize Firebase
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+let db: any;
+try {
+  const configPath = existsSync(path.join(process.cwd(), 'firebase-applet-config.json')) 
+    ? path.join(process.cwd(), 'firebase-applet-config.json')
+    : path.join(process.cwd(), '..', 'firebase-applet-config.json');
+  
+  let firebaseConfig;
+  if (existsSync(configPath)) {
+    firebaseConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
+  } else if (process.env.FIREBASE_CONFIG) {
+    firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
+  } else {
+    throw new Error('Firebase configuration missing');
+  }
+  const firebaseApp = initializeApp(firebaseConfig);
+  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+  console.log('[FIREBASE] Initialized');
+} catch (error) {
+  console.error('[FIREBASE] Initialization failed:', error);
+}
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -30,6 +48,7 @@ const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || 'Lumière Salon';
 // const otpStore = new Map<string, { code: string; expires: number }>();
 
 app.post('/api/send-otp', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
 
@@ -75,6 +94,7 @@ app.post('/api/send-otp', async (req, res) => {
 });
 
 app.post('/api/verify-otp', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const { email, code } = req.body;
   
   try {
@@ -132,7 +152,7 @@ app.post('/api/send-confirmation', async (req, res) => {
   }
 });
 
-// Only setup Vite/static if NOT on Vercel (Vercel handles static via vercel.json)
+// Setup Vite/static ONLY if NOT on Vercel
 if (!process.env.VERCEL) {
   async function startServer() {
     if (process.env.NODE_ENV !== 'production') {
@@ -144,7 +164,7 @@ if (!process.env.VERCEL) {
       app.use(vite.middlewares);
     } else {
       const distPath = path.join(process.cwd(), 'dist');
-      if (require('fs').existsSync(distPath)) {
+      if (existsSync(distPath)) {
         app.use(express.static(distPath));
         app.get('*', (req, res) => {
           res.sendFile(path.join(distPath, 'index.html'));
